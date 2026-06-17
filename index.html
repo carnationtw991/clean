@@ -1,0 +1,671 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Users, Sparkles, Shuffle, Download, Trash2, Plus, Minus, Edit3, 
+  Monitor, UserX, AlertCircle, Star, Smile, Coffee, Wand2, CheckCircle2, 
+  XCircle, X, Upload, Lightbulb, MapPin, UserPlus, ClipboardCheck 
+} from 'lucide-react';
+
+const INITIAL_ZONES = [
+  { id: 'z1', name: '教室', type: 'inner' }, { id: 'z2', name: '走廊', type: 'inner' },
+  { id: 'z3', name: '校門口', type: 'outer' }, { id: 'z4', name: '學務處', type: 'outer' },
+  { id: 'z5', name: '教務處', type: 'outer' }, { id: 'z6', name: '輔導室', type: 'outer' },
+  { id: 'z7', name: '總務處', type: 'outer' }, { id: 'z8', name: '健康中心', type: 'outer' },
+  { id: 'z9', name: '圖書館', type: 'outer' }, { id: 'z10', name: '視聽教室', type: 'outer' },
+  { id: 'z11', name: '廁所', type: 'outer' },
+];
+
+const STANDARD_TASKS = ['掃地', '拖地', '擦桌子', '擦黑板', '擦窗戶', '排桌椅', '倒垃圾', '洗手台', '飲水機'];
+const TOILET_TASKS = ['掃地', '拖地', '洗手台', '刷馬桶', '倒垃圾'];
+
+const BroomIcon = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08" />
+    <path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2.5 2.24 0 1.13 1.08 1.99 2.22 1.93a5.21 5.21 0 0 0 5.38-5.38c-.06-1.14-.9-2.22-2.03-2.22" />
+    <path d="M11 11 8.2 13.8" />
+    <path d="M12.97 12.97 10.2 15.8" />
+  </svg>
+);
+
+export default function App() {
+  const [students, setStudents] = useState([]);
+  const [newStudentName, setNewStudentName] = useState('');
+  const [newStudentNum, setNewStudentNum] = useState('');
+  const [batchCount, setBatchCount] = useState(''); 
+  const [jobs, setJobs] = useState([]);
+  const [zones, setZones] = useState(INITIAL_ZONES);
+  const [selectedZoneId, setSelectedZoneId] = useState(INITIAL_ZONES[0].id);
+  const [selectedTask, setSelectedTask] = useState(STANDARD_TASKS[0]);
+  const [neededCount, setNeededCount] = useState(1);
+  const [constraints, setConstraints] = useState([]); 
+  const [constraintA, setConstraintA] = useState('');
+  const [constraintB, setConstraintB] = useState('');
+  const [zoneConstraints, setZoneConstraints] = useState([]);
+  const [zoneConstStudent, setZoneConstStudent] = useState('');
+  const [zoneConstType, setZoneConstType] = useState('inner');
+  const [activeTab, setActiveTab] = useState('students');
+  const [displayMode, setDisplayMode] = useState('both');
+  const [isProjectorMode, setIsProjectorMode] = useState(false);
+  const [selectedStudentForMove, setSelectedStudentForMove] = useState(null);
+  const [preAssignModalJobId, setPreAssignModalJobId] = useState(null);
+  const [inspections, setInspections] = useState({}); 
+
+  const globalFileInputRef = useRef(null);
+  const [dialog, setDialog] = useState({ isOpen: false, type: 'alert', title: '', message: '', onConfirm: null, confirmText: '確定', cancelText: '取消', icon: 'info' });
+  const [aiResult, setAiResult] = useState({ show: false, loading: false, title: '', content: '' });
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [isAppReady, setIsAppReady] = useState(false);
+
+  useEffect(() => {
+    const savedData = localStorage.getItem('cleaningToolData_Cute');
+    if (savedData) {
+      try {
+        const parsed = JSON.parse(savedData);
+        setStudents(parsed.students || []);
+        setJobs(parsed.jobs || []);
+        setConstraints(parsed.constraints || []);
+        setZoneConstraints(parsed.zoneConstraints || []);
+        setInspections(parsed.inspections || {});
+        if (parsed.zones) setZones(parsed.zones);
+      } catch (e) { console.error("讀取存檔失敗", e); }
+    }
+    setIsLoaded(true); 
+    const timer = setTimeout(() => setIsAppReady(true), 500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (isLoaded) {
+      localStorage.setItem('cleaningToolData_Cute', JSON.stringify({ students, jobs, constraints, zoneConstraints, inspections, zones }));
+    }
+  }, [students, jobs, constraints, zoneConstraints, inspections, zones, isLoaded]);
+
+  const showDialog = (type, title, message, onConfirm = null, icon = 'info', confirmText = '確定') => setDialog({ isOpen: true, type, title, message, onConfirm, confirmText, cancelText: '再想想', icon });
+  const closeDialog = () => setDialog({ ...dialog, isOpen: false });
+  const handleDialogConfirm = () => { if (dialog.onConfirm) dialog.onConfirm(); closeDialog(); };
+  
+  const handleGlobalExport = () => {
+    const data = JSON.stringify({ students, jobs, constraints, zoneConstraints, inspections, zones });
+    const blob = new Blob([data], { type: "application/json" });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `打掃分配本機存檔_${new Date().toLocaleDateString()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleGlobalImport = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const parsed = JSON.parse(e.target.result);
+        if (parsed.students && parsed.jobs) {
+           showDialog('confirm', '還原存檔', `確定要載入本機存檔嗎？將覆蓋目前所有資料。`, () => {
+               setStudents(parsed.students || []); setJobs(parsed.jobs || []);
+               setConstraints(parsed.constraints || []); setZoneConstraints(parsed.zoneConstraints || []);
+               setInspections(parsed.inspections || {}); if (parsed.zones) setZones(parsed.zones);
+               showDialog('alert', '還原成功', `✨ 已成功載入本機資料！`, null, 'success');
+             }, 'warning', '確定還原');
+        } else showDialog('alert', '格式錯誤', '檔案格式不正確。', null, 'error');
+      } catch (error) { showDialog('alert', '讀取失敗', '無法讀取檔案。', null, 'error'); }
+      event.target.value = null; 
+    };
+    reader.readAsText(file);
+  };
+
+  const getStudentDisplay = (id) => {
+    const s = students.find(stu => stu.id === id);
+    if (!s) return '👻';
+    if (displayMode === 'number') return s.number;
+    if (displayMode === 'name') return s.name || s.number;
+    return `${s.number} ${s.name || ''}`;
+  };
+
+  const callGemini = async (prompt, title) => {
+    setAiResult({ show: true, loading: true, title, content: '' });
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=`;
+    try {
+      const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
+      if (!response.ok) throw new Error('API Error');
+      const data = await response.json();
+      setAiResult({ show: true, loading: false, title, content: data.candidates?.[0]?.content?.parts?.[0]?.text || "AI 暫時無法回應。" });
+    } catch (error) {
+      setAiResult({ show: true, loading: false, title, content: "哎呀！AI 助手目前有點忙碌，請檢查網路連線或稍後再試！" });
+    }
+  };
+
+  const handleGenTips = (job) => callGemini(`你是專業又親切的清潔教練。請用繁體中文提供 3 個關於「${job.zoneName} - ${job.taskName}」的打掃小撇步。對象是小學生，請用簡單易懂、鼓勵的語氣。請用條列式呈現，不要太長。`, `✨ ${job.zoneName}${job.taskName} - AI 清潔祕笈`);
+
+  const performBatchGenerate = () => {
+    const count = parseInt(batchCount);
+    const newStudents = [];
+    for (let i = 1; i <= count; i++) {
+      const numStr = i < 10 ? `0${i}` : `${i}`;
+      if (!students.some(s => parseInt(s.number) === i)) newStudents.push({ id: Date.now().toString() + Math.random().toString(36).substr(2, 5), number: numStr, name: '' });
+    }
+    if (newStudents.length > 0) {
+      setStudents(prev => [...prev, ...newStudents].sort((a, b) => parseInt(a.number) - parseInt(b.number)));
+      setBatchCount(''); showDialog('alert', '生成完成', `✨ 成功加入 ${newStudents.length} 位學生！`, null, 'success');
+    } else showDialog('alert', '沒有變化', '沒有新增任何學生', null, 'info');
+  };
+
+  const checkBatchGenerate = () => (!parseInt(batchCount) || parseInt(batchCount) <= 0) ? showDialog('alert', '請輸入人數', '請輸入有效的人數喔！', null, 'warning') : (students.length > 0 ? showDialog('confirm', '確認生成', '名單中已有學生，確定要繼續加入嗎？', performBatchGenerate, 'warning', '繼續加入') : performBatchGenerate());
+  const removeStudent = (id) => {
+    setStudents(students.filter(s => s.id !== id)); setConstraints(constraints.filter(c => c.studentA !== id && c.studentB !== id));
+    setZoneConstraints(zoneConstraints.filter(zc => zc.studentId !== id)); setJobs(jobs.map(j => ({ ...j, assignedStudentIds: j.assignedStudentIds.filter(sid => sid !== id), preAssigned: (j.preAssigned || []).filter(sid => sid !== id) })));
+  };
+  const handleClearAllStudents = () => showDialog('confirm', '清空所有學生', '😱 確定要清空所有學生名單嗎？此動作無法復原喔！', () => { setStudents([]); setZoneConstraints([]); setInspections({}); }, 'error', '殘忍清空');
+
+  const addJob = () => {
+    const zone = zones.find(z => z.id === selectedZoneId);
+    setJobs([...jobs, { id: Date.now().toString(), zoneId: selectedZoneId, zoneName: zone.name, zoneType: zone.type, taskName: selectedTask, count: parseInt(neededCount), assignedStudentIds: [], preAssigned: [] }]);
+  };
+  const removeJob = (id) => setJobs(jobs.filter(j => j.id !== id));
+  const updateJobCount = (id, delta) => setJobs(jobs.map(j => j.id === id ? { ...j, count: Math.max(1, j.count + delta) } : j));
+
+  const handlePreAssign = (jobId, studentId) => {
+    if (!studentId) return;
+    const targetJob = jobs.find(j => j.id === jobId);
+    if ((targetJob.preAssigned?.length || 0) >= targetJob.count) return showDialog('alert', '無法預排', '這個工作的預排人數已經滿了喔！', null, 'warning');
+    if (jobs.find(j => j.preAssigned?.includes(studentId))) return showDialog('alert', '重複預排', `這位學生已經被預排了！`, null, 'warning');
+    setJobs(jobs.map(j => j.id === jobId ? { ...j, preAssigned: [...(j.preAssigned || []), studentId] } : j));
+    setPreAssignModalJobId(null);
+  };
+  const handleRemovePreAssign = (jobId, studentId) => setJobs(jobs.map(j => j.id === jobId ? { ...j, preAssigned: j.preAssigned.filter(id => id !== studentId) } : j));
+
+  const exportWord = () => {
+    const generateTableRows = (jobList) => jobList.map(job => `<tr><td style="border:1px solid black;padding:8px;">${job.zoneName}</td><td style="border:1px solid black;padding:8px;">${job.taskName}</td><td style="border:1px solid black;padding:8px;">${job.count}</td><td style="border:1px solid black;padding:8px;">${job.assignedStudentIds.map(id => { const s = students.find(stu => stu.id === id); return s ? `${s.number} ${s.name || ''}` : ''; }).join('、')}</td></tr>`).join('');
+    const content = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset="utf-8"><title>打掃分配表</title><style>body{font-family:"Microsoft JhengHei";}table{border-collapse:collapse;width:100%;}th{background:#ffebcd;}</style></head><body><h1>🧹 內掃區</h1><table border="1"><thead><tr><th>區域</th><th>項目</th><th>人數</th><th>學生</th></tr></thead><tbody>${generateTableRows(jobs.filter(j => j.zoneType === 'inner'))}</tbody></table><br style="page-break-before:always"><h1>🍂 外掃區</h1><table border="1"><thead><tr><th>區域</th><th>項目</th><th>人數</th><th>學生</th></tr></thead><tbody>${generateTableRows(jobs.filter(j => j.zoneType === 'outer'))}</tbody></table></body></html>`;
+    const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([content], { type: 'application/msword' })); link.download = `打掃分配表_${new Date().toLocaleDateString()}.doc`; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  };
+
+  const exportInspectionWord = () => {
+    const getStatusText = (jobId, studentId) => {
+      const status = inspections[`${jobId}_${studentId}`];
+      if (status === 'completed') return '<span style="color:green; font-weight:bold;">完成</span>';
+      if (status === 'improve') return '<span style="color:orange; font-weight:bold;">待改進</span>';
+      if (status === 'undone') return '<span style="color:red; font-weight:bold;">未做</span>';
+      return '<span style="color:gray;">-</span>';
+    };
+    const generateInspectionRows = (jobList) => {
+      let rows = '';
+      jobList.forEach(job => {
+        if (job.assignedStudentIds.length === 0) rows += `<tr><td style="border:1px solid black;padding:8px;">${job.zoneName}</td><td style="border:1px solid black;padding:8px;">${job.taskName}</td><td style="border:1px solid black;padding:8px;text-align:center;color:gray;" colspan="2">無負責學生</td></tr>`;
+        else job.assignedStudentIds.forEach((studentId, index) => {
+          const s = students.find(stu => stu.id === studentId);
+          const studentName = s ? `${s.number} ${s.name || ''}` : '';
+          const statusText = getStatusText(job.id, studentId);
+          if (index === 0) rows += `<tr><td style="border:1px solid black;padding:8px;" rowspan="${job.assignedStudentIds.length}">${job.zoneName}</td><td style="border:1px solid black;padding:8px;" rowspan="${job.assignedStudentIds.length}">${job.taskName}</td><td style="border:1px solid black;padding:8px;">${studentName}</td><td style="border:1px solid black;padding:8px;text-align:center;">${statusText}</td></tr>`;
+          else rows += `<tr><td style="border:1px solid black;padding:8px;">${studentName}</td><td style="border:1px solid black;padding:8px;text-align:center;">${statusText}</td></tr>`;
+        });
+      });
+      return rows;
+    };
+    const content = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset="utf-8"><title>打掃檢查表</title><style>body{font-family:"Microsoft JhengHei";}table{border-collapse:collapse;width:100%;}th{background:#e0e7ff;}</style></head><body><h1>📋 內掃區檢查表</h1><table border="1"><thead><tr><th>區域</th><th>項目</th><th>學生</th><th>狀態</th></tr></thead><tbody>${generateInspectionRows(jobs.filter(j => j.zoneType === 'inner'))}</tbody></table><br style="page-break-before:always"><h1>📋 外掃區檢查表</h1><table border="1"><thead><tr><th>區域</th><th>項目</th><th>學生</th><th>狀態</th></tr></thead><tbody>${generateInspectionRows(jobs.filter(j => j.zoneType === 'outer'))}</tbody></table></body></html>`;
+    const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([content], { type: 'application/msword' })); link.download = `打掃檢查表_${new Date().toLocaleDateString()}.doc`; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  };
+
+  const addConstraint = () => {
+    if (!constraintA || !constraintB || constraintA === constraintB) return;
+    setConstraints([...constraints, { id: Date.now().toString(), studentA: constraintA, studentB: constraintB }]); setConstraintA(''); setConstraintB('');
+  };
+
+  const addZoneConstraint = () => {
+    if (!zoneConstStudent) return;
+    setZoneConstraints([...zoneConstraints.filter(zc => zc.studentId !== zoneConstStudent), { id: Date.now().toString(), studentId: zoneConstStudent, zoneType: zoneConstType }]); setZoneConstStudent('');
+  };
+
+  const performAutoAssign = () => {
+    let newJobs = jobs.map(j => ({ ...j, assignedStudentIds: [...(j.preAssigned || [])] }));
+    const preAssignedStudentIds = new Set();
+    newJobs.forEach(j => j.assignedStudentIds.forEach(id => preAssignedStudentIds.add(id)));
+    let availableStudents = students.filter(s => !preAssignedStudentIds.has(s.id)).sort(() => Math.random() - 0.5);
+    let assignedCount = preAssignedStudentIds.size;
+
+    for (let jobIndex = 0; jobIndex < newJobs.length; jobIndex++) {
+      const job = newJobs[jobIndex];
+      let needed = job.count - job.assignedStudentIds.length;
+      if (needed <= 0) continue;
+      let attempts = 0;
+      while (needed > 0 && availableStudents.length > 0 && attempts < availableStudents.length + 100) {
+        let candidateIndex = -1;
+        for (let i = 0; i < availableStudents.length; i++) {
+          const student = availableStudents[i];
+          const zConstraint = zoneConstraints.find(zc => zc.studentId === student.id);
+          if (zConstraint && zConstraint.zoneType !== job.zoneType) continue;
+          if (job.assignedStudentIds.some(existingId => constraints.some(c => (c.studentA === student.id && c.studentB === existingId) || (c.studentB === student.id && c.studentA === existingId)))) continue;
+          candidateIndex = i; break; 
+        }
+        if (candidateIndex !== -1) {
+          job.assignedStudentIds.push(availableStudents[candidateIndex].id);
+          availableStudents.splice(candidateIndex, 1); needed--; assignedCount++;
+        } else break;
+        attempts++;
+      }
+    }
+    setJobs(newJobs); setInspections({}); showDialog('alert', '分配完成', `🎈 大家動起來！已分配 ${assignedCount} 人次的工作。`, null, 'success');
+  };
+
+  const checkAutoAssign = () => {
+    let totalSlots = jobs.reduce((acc, j) => acc + j.count, 0);
+    if (students.length < totalSlots) showDialog('confirm', '人手不足警告', `⚠️ 學生人數 (${students.length}) 少於總需求 (${totalSlots})，仍要分配嗎？`, performAutoAssign, 'warning', '強制分配');
+    else performAutoAssign();
+  };
+
+  const handleStudentClick = (studentId, jobId) => {
+    if (selectedStudentForMove) {
+      if (selectedStudentForMove.studentId === studentId) { setSelectedStudentForMove(null); return; }
+      const newJobs = [...jobs];
+      const sourceJob = newJobs.find(j => j.id === selectedStudentForMove.sourceJobId);
+      const targetJob = newJobs.find(j => j.id === jobId);
+      sourceJob.assignedStudentIds = sourceJob.assignedStudentIds.filter(id => id !== selectedStudentForMove.studentId);
+      targetJob.assignedStudentIds = targetJob.assignedStudentIds.filter(id => id !== studentId);
+      sourceJob.assignedStudentIds.push(studentId); targetJob.assignedStudentIds.push(selectedStudentForMove.studentId);
+      setJobs(newJobs); setSelectedStudentForMove(null);
+    } else setSelectedStudentForMove({ studentId, sourceJobId: jobId });
+  };
+
+  const handleEmptySlotClick = (jobId) => {
+    if (!selectedStudentForMove) return;
+    const newJobs = [...jobs];
+    const sourceJob = newJobs.find(j => j.id === selectedStudentForMove.sourceJobId);
+    const targetJob = newJobs.find(j => j.id === jobId);
+    if (targetJob.assignedStudentIds.length >= targetJob.count) return showDialog('alert', '額滿囉', '工作已滿！', null, 'warning');
+    sourceJob.assignedStudentIds = sourceJob.assignedStudentIds.filter(id => id !== selectedStudentForMove.studentId);
+    targetJob.assignedStudentIds.push(selectedStudentForMove.studentId);
+    setJobs(newJobs); setSelectedStudentForMove(null);
+  };
+
+  const handleInspect = (jobId, studentId, status) => {
+    const key = `${jobId}_${studentId}`;
+    setInspections(prev => ({ ...prev, [key]: prev[key] === status ? null : status }));
+  };
+
+  if (!isAppReady) {
+    return (
+      <div className="min-h-screen bg-amber-50 flex flex-col items-center justify-center space-y-6 pt-10">
+        <BroomIcon className="w-20 h-20 text-pink-400 animate-bounce" />
+        <div className="text-2xl font-black text-pink-500 animate-pulse tracking-widest">系統防護網啟動中...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-amber-50 text-slate-700 font-sans selection:bg-pink-200 pb-24 flex flex-col pt-10">
+      <header className="bg-pink-400 p-4 shadow-lg sticky top-10 z-50 border-b-4 border-pink-500">
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+          <h1 className="text-2xl font-bold flex items-center gap-2 text-white drop-shadow-md text-center md:text-left">
+            <BroomIcon className="w-8 h-8 text-yellow-300 fill-current shrink-0" />
+            <span>清潔任務派遣所<br className="md:hidden"/><span className="text-sm md:text-xl font-normal ml-0 md:ml-2">～老師專用打掃分配神器</span></span>
+            <Sparkles className="w-6 h-6 text-yellow-200 animate-pulse hidden md:block shrink-0" />
+          </h1>
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+            <nav className="flex flex-wrap justify-center gap-1.5 bg-pink-300/50 rounded-2xl p-1.5 w-full sm:w-auto">
+              {[
+                { id: 'students', label: '1.名單', icon: Users }, { id: 'jobs', label: '2.工作', icon: Edit3 },
+                { id: 'constraints', label: '3.排斥', icon: UserX }, { id: 'assign', label: '4.分配', icon: Star },
+                { id: 'inspect', label: '5.檢查', icon: ClipboardCheck }
+              ].map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-bold transition-all duration-300 ${activeTab === tab.id ? 'bg-white text-pink-500 shadow-md transform scale-105' : 'text-white hover:bg-white/30'}`}>
+                  <tab.icon size={14} className="shrink-0" /><span>{tab.label}</span>
+                </button>
+              ))}
+            </nav>
+            <div className="flex justify-center gap-2">
+              <input type="file" accept=".json" ref={globalFileInputRef} className="hidden" onChange={handleGlobalImport} />
+              <button onClick={() => globalFileInputRef.current.click()} className="flex items-center gap-1 bg-pink-500 hover:bg-pink-600 text-white px-3 py-1.5 rounded-xl text-sm font-bold shadow-sm transition border-b-2 border-pink-700 active:border-b-0 active:translate-y-[2px]" title="匯入本機電腦中的存檔"><Upload size={14} /> 本機匯入</button>
+              <button onClick={handleGlobalExport} className="flex items-center gap-1 bg-yellow-400 hover:bg-yellow-500 text-yellow-900 px-3 py-1.5 rounded-xl text-sm font-bold shadow-sm transition border-b-2 border-yellow-600 active:border-b-0 active:translate-y-[2px]" title="將設定與分配結果下載至本機電腦儲存"><Download size={14} /> 本機儲存</button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto p-4 md:p-8 flex-grow w-full">
+        {activeTab === 'students' && (
+          <div className="space-y-8 animate-fadeIn">
+            <div className="bg-gradient-to-r from-purple-100 to-pink-100 p-6 rounded-3xl shadow-lg border-4 border-white relative overflow-hidden">
+              <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-purple-600"><div className="bg-white p-2 rounded-full shadow-sm"><Wand2 className="w-6 h-6 text-purple-500" /></div>懶人專區：快速生成全班座號</h2>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="font-bold text-slate-600">我班上有</span>
+                <input type="number" value={batchCount} onChange={(e) => setBatchCount(e.target.value)} placeholder="30" className="border-2 border-purple-200 p-3 rounded-2xl w-24 text-center font-bold text-xl outline-none focus:border-purple-400 focus:ring-4 focus:ring-purple-100 transition" onKeyDown={(e) => e.key === 'Enter' && checkBatchGenerate()} />
+                <span className="font-bold text-slate-600">位學生</span>
+                <button onClick={checkBatchGenerate} className="bg-purple-500 text-white font-bold px-6 py-3 rounded-2xl shadow-md hover:bg-purple-600 hover:scale-105 transition border-b-4 border-purple-700 active:border-b-0 active:translate-y-1">加入學生</button>
+              </div>
+            </div>
+            <div className="bg-white p-6 rounded-3xl shadow-xl border-4 border-orange-200">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-bold text-orange-600 flex items-center gap-2"><div className="bg-orange-100 p-2 rounded-full"><Users className="w-6 h-6"/></div>目前名單 <span className="text-sm bg-orange-100 px-3 py-1 rounded-full text-orange-600">{students.length} 人</span></h2>
+                {students.length > 0 && <button onClick={handleClearAllStudents} className="text-red-400 text-sm hover:text-red-600 hover:bg-red-50 px-3 py-1 rounded-full transition font-bold flex items-center gap-1"><Trash2 size={16}/> 清空全部</button>}
+              </div>
+              <div className="flex flex-wrap gap-3">
+                {students.map(s => (
+                  <div key={s.id} className={`relative group ${s.name ? 'bg-orange-50 border-2 border-orange-100 pl-3 pr-2 py-2 rounded-full flex items-center gap-2' : 'w-16 h-16 bg-white border-2 border-orange-200 rounded-2xl flex items-center justify-center'} hover:scale-105 transition shadow-sm hover:shadow-md hover:border-orange-300`}>
+                    <span className={`font-mono font-black text-orange-500 ${s.name ? 'text-orange-400 bg-white w-6 h-6 flex items-center justify-center rounded-full text-xs shadow-inner' : 'text-2xl'}`}>{s.number}</span>
+                    {s.name && <span className="font-bold text-slate-600">{s.name}</span>}
+                    <button onClick={() => removeStudent(s.id)} className={`flex items-center justify-center transition ${s.name ? 'w-6 h-6 rounded-full text-orange-300 hover:bg-red-400 hover:text-white' : 'absolute -top-2 -right-2 w-6 h-6 bg-red-100 text-red-500 rounded-full border border-red-200 opacity-0 group-hover:opacity-100 z-10'}`}><Trash2 size={12} /></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'jobs' && (
+          <div className="space-y-8 animate-fadeIn">
+            <div className="bg-white p-6 rounded-3xl shadow-xl border-4 border-green-200">
+              <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-green-600"><div className="bg-green-100 p-2 rounded-full"><Edit3 className="w-6 h-6"/></div>設定打掃任務</h2>
+              <div className="flex flex-wrap gap-4 items-end bg-green-50 p-6 rounded-2xl border-2 border-green-100">
+                <div>
+                  <label className="block text-sm font-bold text-green-600 mb-2 ml-1">地點</label>
+                  <select value={selectedZoneId} onChange={(e) => { setSelectedZoneId(e.target.value); setSelectedTask(zones.find(z => z.id === e.target.value).name.includes('廁所') ? TOILET_TASKS[0] : STANDARD_TASKS[0]); }} className="border-2 border-green-200 focus:border-green-400 p-2.5 rounded-xl w-40 outline-none bg-white font-bold text-slate-600 cursor-pointer">
+                    <optgroup label="🏠 內掃區">{zones.filter(z => z.type === 'inner').map(z => <option key={z.id} value={z.id}>{z.name}</option>)}</optgroup>
+                    <optgroup label="🍂 外掃區">{zones.filter(z => z.type === 'outer').map(z => <option key={z.id} value={z.id}>{z.name}</option>)}</optgroup>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-green-600 mb-2 ml-1">要做什麼</label>
+                  <div className="flex gap-2">
+                    <select value={selectedTask} onChange={(e) => setSelectedTask(e.target.value)} className="border-2 border-green-200 focus:border-green-400 p-2.5 rounded-xl w-40 outline-none bg-white text-slate-600 cursor-pointer">
+                      {(zones.find(z => z.id === selectedZoneId)?.name.includes('廁所') ? TOILET_TASKS : STANDARD_TASKS).map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <input type="text" placeholder="自訂..." className="border-2 border-green-200 focus:border-green-400 p-2.5 rounded-xl w-24 text-sm outline-none" onChange={(e) => setSelectedTask(e.target.value)} />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-green-600 mb-2 ml-1">幾個人</label>
+                  <input type="number" min="1" value={neededCount} onChange={(e) => setNeededCount(e.target.value)} className="border-2 border-green-200 focus:border-green-400 p-2.5 rounded-xl w-20 outline-none text-center font-bold" />
+                </div>
+                <button onClick={addJob} className="bg-green-500 text-white font-bold px-5 py-2.5 rounded-xl shadow-md hover:bg-green-600 hover:scale-105 transition flex items-center gap-1"><Plus size={20} /> 加入</button>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-3xl shadow-xl border-4 border-slate-200">
+              <div className="flex justify-between items-center mb-6 border-b-2 border-slate-100 pb-4">
+                <h2 className="text-xl font-bold text-slate-600">工作清單 <span className="ml-2 text-sm font-normal bg-slate-100 px-3 py-1 rounded-full">總需 {jobs.reduce((acc, curr) => acc + curr.count, 0)} 人 / 學生 {students.length} 人</span></h2>
+                {jobs.reduce((acc, curr) => acc + curr.count, 0) > students.length && <span className="text-red-500 text-sm font-bold flex items-center gap-1 bg-red-100 px-3 py-1 rounded-full animate-bounce"><AlertCircle size={16} /> 人手不夠啦！</span>}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {[{ type: 'inner', title: '內掃區', color: 'sky' }, { type: 'outer', title: '外掃區', color: 'emerald' }].map(zone => (
+                  <div key={zone.type} className={`bg-${zone.color}-50 p-4 rounded-3xl border-2 border-${zone.color}-100`}>
+                    <h3 className={`font-bold text-${zone.color}-600 mb-4 flex items-center gap-2`}><div className={`w-3 h-3 rounded-full bg-${zone.color}-400`}></div> {zone.title}</h3>
+                    <ul className="space-y-3">
+                      {jobs.filter(j => j.zoneType === zone.type).map(j => (
+                        <li key={j.id} className="bg-white p-3 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="flex items-center gap-2"><span className={`font-bold text-${zone.color}-700 bg-${zone.color}-100 px-2 py-1 rounded-lg text-sm`}>{j.zoneName}</span><span className="text-slate-700 font-bold">{j.taskName}</span></span>
+                            <div className="flex items-center gap-2">
+                              <div className="flex items-center bg-slate-100 rounded-lg border border-slate-200">
+                                <button onClick={() => updateJobCount(j.id, -1)} className="px-2 py-1 hover:bg-slate-200 text-slate-500 rounded-l-lg transition disabled:opacity-30" disabled={j.count <= 1}><Minus size={12} /></button>
+                                <span className="px-2 text-xs font-bold text-slate-600 w-6 text-center select-none">{j.count}</span>
+                                <button onClick={() => updateJobCount(j.id, 1)} className="px-2 py-1 hover:bg-slate-200 text-slate-500 rounded-r-lg transition"><Plus size={12} /></button>
+                              </div>
+                              <span className="text-xs text-slate-400 font-bold">人</span>
+                              <button onClick={() => removeJob(j.id)} className="w-8 h-8 flex items-center justify-center rounded-full text-slate-300 hover:bg-red-100 hover:text-red-500 transition ml-1"><Trash2 size={16} /></button>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-dashed border-slate-100">
+                            <span className="text-xs text-slate-400 font-bold flex items-center gap-1"><UserPlus size={12}/> 預排:</span>
+                            {j.preAssigned && j.preAssigned.map(sid => {
+                              const s = students.find(stu => stu.id === sid);
+                              return s ? (<span key={sid} className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full flex items-center gap-1">{s.number} {s.name}<button onClick={() => handleRemovePreAssign(j.id, sid)} className="hover:text-red-500"><X size={10}/></button></span>) : null;
+                            })}
+                            {(j.preAssigned?.length || 0) < j.count && (
+                              <div className="relative">
+                                <button onClick={() => setPreAssignModalJobId(preAssignModalJobId === j.id ? null : j.id)} className="text-xs bg-slate-50 hover:bg-yellow-50 text-slate-400 hover:text-yellow-600 px-2 py-0.5 rounded-full border border-slate-200 transition">+ 選擇</button>
+                                {preAssignModalJobId === j.id && (
+                                  <div className="absolute top-full left-0 mt-1 w-48 bg-white border-2 border-yellow-200 rounded-xl shadow-xl z-20 max-h-48 overflow-y-auto p-1">
+                                    {students.filter(s => !jobs.some(job => job.preAssigned?.includes(s.id))).map(s => (<div key={s.id} onClick={() => handlePreAssign(j.id, s.id)} className="px-3 py-2 hover:bg-yellow-50 rounded-lg cursor-pointer text-sm text-slate-600 font-bold">{s.number} {s.name}</div>))}
+                                    {students.filter(s => !jobs.some(job => job.preAssigned?.includes(s.id))).length === 0 && <div className="p-2 text-xs text-center text-gray-400">無可用學生</div>}
+                                  </div>
+                                )}
+                                {preAssignModalJobId === j.id && <div className="fixed inset-0 z-10" onClick={() => setPreAssignModalJobId(null)}></div>}
+                              </div>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'constraints' && (
+          <div className="space-y-8 animate-fadeIn">
+            <div className="bg-white p-6 rounded-3xl shadow-xl border-4 border-blue-200">
+              <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-blue-600"><div className="bg-blue-100 p-2 rounded-full"><MapPin className="w-6 h-6"/></div>區域指定 (誰只能掃哪裡)</h2>
+              <div className="flex flex-wrap gap-4 items-center bg-blue-50 p-6 rounded-2xl border-2 border-blue-100">
+                <select value={zoneConstStudent} onChange={(e) => setZoneConstStudent(e.target.value)} className="border-2 border-blue-200 focus:border-blue-400 p-2.5 rounded-xl bg-white outline-none cursor-pointer w-full md:w-auto">
+                  <option value="">選擇學生</option>{students.map(s => <option key={s.id} value={s.id}>{s.number} {s.name}</option>)}
+                </select>
+                <span className="font-bold text-slate-600">必須在</span>
+                <div className="flex bg-white rounded-xl border-2 border-blue-200 overflow-hidden shrink-0">
+                  <button onClick={() => setZoneConstType('inner')} className={`px-4 py-2 font-bold transition ${zoneConstType === 'inner' ? 'bg-sky-400 text-white' : 'text-slate-400 hover:bg-slate-50'}`}>內掃區</button>
+                  <button onClick={() => setZoneConstType('outer')} className={`px-4 py-2 font-bold transition ${zoneConstType === 'outer' ? 'bg-emerald-400 text-white' : 'text-slate-400 hover:bg-slate-50'}`}>外掃區</button>
+                </div>
+                <button onClick={addZoneConstraint} className="bg-blue-500 text-white font-bold px-6 py-2.5 rounded-xl shadow-md hover:bg-blue-600 hover:scale-105 transition w-full md:w-auto">新增規則</button>
+              </div>
+              <div className="mt-6 flex flex-wrap gap-3">
+                {zoneConstraints.map(zc => {
+                  const s = students.find(stu => stu.id === zc.studentId);
+                  if (!s) return null;
+                  return (
+                    <div key={zc.id} className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 font-bold text-sm ${zc.zoneType === 'inner' ? 'bg-sky-50 border-sky-200 text-sky-600' : 'bg-emerald-50 border-emerald-200 text-emerald-600'}`}>
+                      <span>{s.number} {s.name}</span><span>→</span><span>{zc.zoneType === 'inner' ? '內掃' : '外掃'}</span>
+                      <button onClick={() => setZoneConstraints(zoneConstraints.filter(x => x.id !== zc.id))} className="ml-2 hover:text-red-500"><X size={14}/></button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-3xl shadow-xl border-4 border-purple-200">
+              <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-purple-600"><div className="bg-purple-100 p-2 rounded-full"><UserX className="w-6 h-6"/></div>不要在同一組 (排斥條款)</h2>
+              <div className="flex flex-wrap gap-4 items-center bg-purple-50 p-6 rounded-2xl border-2 border-purple-100">
+                <select value={constraintA} onChange={(e) => setConstraintA(e.target.value)} className="border-2 border-purple-200 focus:border-purple-400 p-2.5 rounded-xl bg-white outline-none cursor-pointer flex-1 md:flex-none">
+                  <option value="">選擇學生 A</option>{students.map(s => <option key={s.id} value={s.id}>{s.number} {s.name}</option>)}
+                </select>
+                <span className="text-purple-400 font-bold text-xl shrink-0">⚡</span>
+                <select value={constraintB} onChange={(e) => setConstraintB(e.target.value)} className="border-2 border-purple-200 focus:border-purple-400 p-2.5 rounded-xl bg-white outline-none cursor-pointer flex-1 md:flex-none">
+                  <option value="">選擇學生 B</option>{students.map(s => <option key={s.id} value={s.id}>{s.number} {s.name}</option>)}
+                </select>
+                <button onClick={addConstraint} className="bg-purple-500 text-white font-bold px-6 py-2.5 rounded-xl shadow-md hover:bg-purple-600 hover:scale-105 transition w-full md:w-auto">分開他們！</button>
+              </div>
+              <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {constraints.map(c => {
+                  const sA = students.find(s => s.id === c.studentA); const sB = students.find(s => s.id === c.studentB);
+                  if (!sA || !sB) return null;
+                  return (
+                    <div key={c.id} className="flex justify-between items-center bg-white border-2 border-purple-100 p-4 rounded-2xl shadow-sm">
+                      <span className="text-sm font-bold text-slate-600 flex items-center"><span className="bg-purple-100 text-purple-600 px-2 py-1 rounded-lg mr-2">{sA.number} {sA.name}</span> ⚡ <span className="bg-purple-100 text-purple-600 px-2 py-1 rounded-lg ml-2">{sB.number} {sB.name}</span></span>
+                      <button onClick={() => setConstraints(constraints.filter(x => x.id !== c.id))} className="text-purple-200 hover:text-red-500 transition"><Trash2 size={18} /></button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'assign' && (
+          <div className="space-y-6 animate-fadeIn pb-20">
+            <div className="bg-white p-4 rounded-3xl shadow-lg border-2 border-pink-100 flex flex-col md:flex-row gap-4 justify-between items-center md:sticky md:top-32 z-40">
+              <div className="flex gap-4 items-center flex-wrap justify-center md:justify-start">
+                <button onClick={checkAutoAssign} className="bg-gradient-to-r from-pink-500 to-rose-400 text-white px-6 py-3 rounded-full shadow-lg hover:shadow-xl hover:scale-105 transition flex items-center gap-2 font-bold border-b-4 border-rose-600 active:border-b-0 active:translate-y-1"><Shuffle size={20} /> 一鍵自動分配！</button>
+                <div className="flex items-center bg-gray-100 rounded-full p-1.5 shadow-inner">
+                  <button onClick={() => setDisplayMode('name')} className={`px-3 md:px-4 py-1.5 rounded-full text-xs md:text-sm font-bold transition ${displayMode==='name'?'bg-white shadow text-pink-500':'text-gray-400'}`}>姓名</button>
+                  <button onClick={() => setDisplayMode('number')} className={`px-3 md:px-4 py-1.5 rounded-full text-xs md:text-sm font-bold transition ${displayMode==='number'?'bg-white shadow text-pink-500':'text-gray-400'}`}>座號</button>
+                  <button onClick={() => setDisplayMode('both')} className={`px-3 md:px-4 py-1.5 rounded-full text-xs md:text-sm font-bold transition ${displayMode==='both'?'bg-white shadow text-pink-500':'text-gray-400'}`}>都有</button>
+                </div>
+                <label className="flex items-center gap-2 text-sm font-bold text-slate-500 cursor-pointer select-none bg-slate-100 px-4 py-2 rounded-full hover:bg-slate-200 transition"><input type="checkbox" checked={isProjectorMode} onChange={(e) => setIsProjectorMode(e.target.checked)} className="accent-pink-500 w-4 h-4" /><Monitor size={16} /> 大字模式</label>
+              </div>
+              <div className="flex gap-2">
+                 <button onClick={exportWord} className="bg-blue-400 text-white px-5 py-2.5 rounded-full hover:bg-blue-500 font-bold shadow-md flex items-center gap-2 transition hover:-translate-y-0.5 w-full md:w-auto justify-center"><Download size={18} /> 下載 Word</button>
+              </div>
+            </div>
+            <p className="text-center text-slate-500 font-bold bg-white/50 py-2 rounded-xl text-sm md:text-base">💡 點擊學生可與另一個學生交換工作</p>
+            {selectedStudentForMove && (
+               <div className="bg-yellow-100 border-4 border-yellow-300 text-yellow-800 p-4 rounded-2xl sticky top-56 z-40 shadow-xl animate-bounce flex flex-col md:flex-row items-center gap-4 justify-center text-center md:text-left">
+                  <div className="bg-white p-2 rounded-full shadow-sm shrink-0"><Shuffle className="text-yellow-500"/></div>
+                  <div><p className="font-bold text-lg">正在幫 {getStudentDisplay(selectedStudentForMove.studentId)} 換位子</p><p className="text-sm opacity-80">點擊另一個學生交換，或是點擊虛線空位移動</p></div>
+               </div>
+            )}
+            <div className={`flex flex-col lg:flex-row gap-6 items-start ${isProjectorMode ? 'lg:flex-col' : ''}`}>
+              <div className="flex-1 w-full bg-sky-50/50 p-4 rounded-3xl border border-sky-100">
+                <div className="mb-4 flex items-center gap-2 border-b border-sky-200 pb-2"><h2 className="text-2xl font-bold text-sky-600">🧹 內掃區</h2></div>
+                <div className={`grid ${isProjectorMode ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-2'} gap-3`}>
+                  {jobs.filter(j => j.zoneType === 'inner').map(job => <CuteJobCard key={job.id} job={job} getStudentDisplay={getStudentDisplay} isProjectorMode={isProjectorMode} selectedStudentForMove={selectedStudentForMove} onStudentClick={handleStudentClick} onEmptySlotClick={handleEmptySlotClick} onGenTips={() => handleGenTips(job)} theme="sky" />)}
+                </div>
+              </div>
+              <div className="flex-[1.5] w-full bg-emerald-50/50 p-4 rounded-3xl border border-emerald-100">
+                <div className="mb-4 flex items-center gap-2 border-b border-emerald-200 pb-2"><h2 className="text-2xl font-bold text-emerald-600">🍂 外掃區</h2></div>
+                <div className={`grid ${isProjectorMode ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3'} gap-3`}>
+                  {jobs.filter(j => j.zoneType === 'outer').map(job => <CuteJobCard key={job.id} job={job} getStudentDisplay={getStudentDisplay} isProjectorMode={isProjectorMode} selectedStudentForMove={selectedStudentForMove} onStudentClick={handleStudentClick} onEmptySlotClick={handleEmptySlotClick} onGenTips={() => handleGenTips(job)} theme="emerald" />)}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'inspect' && (
+          <div className="space-y-6 animate-fadeIn pb-20">
+            <div className="bg-white p-4 rounded-3xl shadow-lg border-2 border-indigo-100 flex flex-col md:flex-row gap-4 justify-between items-center md:sticky md:top-32 z-40">
+               <h2 className="text-xl font-bold text-indigo-600 flex items-center gap-2"><ClipboardCheck size={24} /> 打掃工作檢查</h2>
+               <div className="flex flex-wrap items-center justify-center gap-3 w-full md:w-auto">
+                  <div className="flex items-center bg-gray-100 rounded-full p-1.5 shadow-inner">
+                    <button onClick={() => setDisplayMode('name')} className={`px-3 md:px-4 py-1.5 rounded-full text-xs md:text-sm font-bold transition ${displayMode==='name'?'bg-white shadow text-indigo-500':'text-gray-400'}`}>姓名</button>
+                    <button onClick={() => setDisplayMode('number')} className={`px-3 md:px-4 py-1.5 rounded-full text-xs md:text-sm font-bold transition ${displayMode==='number'?'bg-white shadow text-indigo-500':'text-gray-400'}`}>座號</button>
+                    <button onClick={() => setDisplayMode('both')} className={`px-3 md:px-4 py-1.5 rounded-full text-xs md:text-sm font-bold transition ${displayMode==='both'?'bg-white shadow text-indigo-500':'text-gray-400'}`}>都有</button>
+                  </div>
+                  <button onClick={() => showDialog('confirm', '重置檢查', '確定要清空所有檢查狀態嗎？', () => setInspections({}), 'warning', '確定重置')} className="bg-slate-100 text-slate-600 px-4 py-2 rounded-full font-bold hover:bg-slate-200 transition shadow-sm text-sm">重置</button>
+                  <button onClick={exportInspectionWord} className="bg-indigo-500 text-white px-4 py-2 rounded-full font-bold shadow-md hover:bg-indigo-600 transition flex items-center gap-2 text-sm"><Download size={16} /> 下載檢查表</button>
+               </div>
+            </div>
+            <div className="flex flex-col lg:flex-row gap-6 items-start">
+              <div className="flex-1 w-full bg-sky-50/50 p-4 rounded-3xl border border-sky-100">
+                <div className="mb-4 border-b border-sky-200 pb-2"><h2 className="text-2xl font-bold text-sky-600">🧹 內掃區檢查</h2></div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                   {jobs.filter(j => j.zoneType === 'inner').map(job => <InspectionJobCard key={job.id} job={job} getStudentDisplay={getStudentDisplay} inspections={inspections} handleInspect={handleInspect} />)}
+                </div>
+              </div>
+              <div className="flex-1 w-full bg-emerald-50/50 p-4 rounded-3xl border border-emerald-100">
+                <div className="mb-4 border-b border-emerald-200 pb-2"><h2 className="text-2xl font-bold text-emerald-600">🍂 外掃區檢查</h2></div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                   {jobs.filter(j => j.zoneType === 'outer').map(job => <InspectionJobCard key={job.id} job={job} getStudentDisplay={getStudentDisplay} inspections={inspections} handleInspect={handleInspect} />)}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+      
+      <footer className="text-center py-8 bg-amber-50 mt-auto">
+        <span className="inline-block bg-white px-6 py-2.5 rounded-full shadow-sm text-slate-700 text-base font-black border-2 border-orange-200 tracking-wide hover:scale-105 transition-transform cursor-default">
+          © 2026 鄭念慈 版權所有
+        </span>
+      </footer>
+
+      {dialog.isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 animate-fadeIn">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeDialog}></div>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 relative z-[101] border-4 border-white transform transition-all scale-100">
+            <button onClick={closeDialog} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X size={24} /></button>
+            <div className="flex flex-col items-center text-center">
+              <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${dialog.icon === 'success' ? 'bg-green-100 text-green-500' : ''} ${dialog.icon === 'warning' ? 'bg-yellow-100 text-yellow-500' : ''} ${dialog.icon === 'error' ? 'bg-red-100 text-red-500' : ''} ${dialog.icon === 'info' ? 'bg-blue-100 text-blue-500' : ''}`}>
+                {dialog.icon === 'success' && <CheckCircle2 size={32} />}{dialog.icon === 'warning' && <AlertCircle size={32} />}{dialog.icon === 'error' && <XCircle size={32} />}{dialog.icon === 'info' && <Smile size={32} />}
+              </div>
+              <h3 className="text-xl font-bold text-gray-800 mb-2">{dialog.title}</h3>
+              <p className="text-gray-600 mb-6">{dialog.message}</p>
+              <div className="flex gap-3 w-full">
+                {dialog.type === 'confirm' && <button onClick={closeDialog} className="flex-1 py-3 px-4 rounded-xl border-2 border-gray-200 font-bold text-gray-500 hover:bg-gray-50 transition">{dialog.cancelText}</button>}
+                <button onClick={handleDialogConfirm} className={`flex-1 py-3 px-4 rounded-xl font-bold text-white shadow-md transition transform hover:scale-105 ${dialog.icon === 'error' ? 'bg-red-500 hover:bg-red-600' : 'bg-pink-500 hover:bg-pink-600'}`}>{dialog.confirmText}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {aiResult.show && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 animate-fadeIn">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setAiResult({ ...aiResult, show: false })}></div>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg p-6 relative z-[101] border-4 border-purple-200 transform transition-all scale-100 overflow-hidden">
+            <button onClick={() => setAiResult({ ...aiResult, show: false })} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X size={24} /></button>
+            <div className="flex flex-col items-center">
+              <div className="w-16 h-16 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center mb-4 animate-pulse"><Sparkles size={32} /></div>
+              <h3 className="text-2xl font-bold text-purple-700 mb-4">{aiResult.title}</h3>
+              {aiResult.loading ? (
+                <div className="flex flex-col items-center py-8"><div className="w-10 h-10 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mb-4"></div><p className="text-purple-400 font-bold animate-pulse">AI 正在努力思考中...</p></div>
+              ) : (
+                <div className="w-full bg-purple-50 p-4 rounded-xl border border-purple-100 text-gray-700 leading-relaxed whitespace-pre-wrap max-h-[60vh] overflow-y-auto">{aiResult.content}</div>
+              )}
+              {!aiResult.loading && <button onClick={() => setAiResult({ ...aiResult, show: false })} className="mt-6 bg-purple-600 text-white px-8 py-2 rounded-full font-bold shadow-md hover:bg-purple-700 transition">太棒了，收下！</button>}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InspectionJobCard({ job, getStudentDisplay, inspections, handleInspect }) {
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border-b-2 border-slate-200 p-3 transition hover:-translate-y-1 hover:shadow-md">
+      <div className="mb-3 border-b border-slate-100 pb-2">
+        <h3 className="text-lg font-black text-slate-700 tracking-tight">{job.zoneName}</h3><span className="text-sm font-bold text-slate-500">{job.taskName}</span>
+      </div>
+      <div className="space-y-2">
+         {job.assignedStudentIds.map(studentId => {
+           const status = inspections[`${job.id}_${studentId}`];
+           let bgClass = "bg-slate-50 border-slate-200 text-slate-700";
+           if (status === 'completed') bgClass = "bg-green-100 border-green-400 text-green-800";
+           if (status === 'improve') bgClass = "bg-orange-100 border-orange-400 text-orange-800";
+           if (status === 'undone') bgClass = "bg-red-100 border-red-400 text-red-800";
+           return (
+             <div key={studentId} className={`flex flex-col sm:flex-row sm:items-center justify-between p-2.5 rounded-xl border-2 transition-colors gap-3 ${bgClass}`}>
+               <span className="font-bold text-base flex-1 break-words">{getStudentDisplay(studentId)}</span>
+               <div className="flex flex-wrap gap-1.5 shrink-0 justify-end">
+                 <button onClick={() => handleInspect(job.id, studentId, 'completed')} className={`text-xs px-2.5 py-1.5 rounded-lg font-bold transition-all ${status === 'completed' ? 'bg-green-500 text-white shadow-md' : 'bg-white text-green-600 border border-green-200 hover:bg-green-50'}`}>完成</button>
+                 <button onClick={() => handleInspect(job.id, studentId, 'improve')} className={`text-xs px-2.5 py-1.5 rounded-lg font-bold transition-all ${status === 'improve' ? 'bg-orange-500 text-white shadow-md' : 'bg-white text-orange-600 border border-orange-200 hover:bg-orange-50'}`}>待改進</button>
+                 <button onClick={() => handleInspect(job.id, studentId, 'undone')} className={`text-xs px-2.5 py-1.5 rounded-lg font-bold transition-all ${status === 'undone' ? 'bg-red-500 text-white shadow-md' : 'bg-white text-red-600 border border-red-200 hover:bg-red-50'}`}>未做</button>
+               </div>
+             </div>
+           );
+         })}
+         {job.assignedStudentIds.length === 0 && <div className="text-sm text-slate-400 text-center py-2 font-bold">無負責學生</div>}
+      </div>
+    </div>
+  );
+}
+
+function CuteJobCard({ job, getStudentDisplay, isProjectorMode, selectedStudentForMove, onStudentClick, onEmptySlotClick, onGenTips, theme }) {
+  const t = { sky: { bg: 'bg-white', border: 'border-sky-200', title: 'text-sky-700', sub: 'text-sky-500', slot: 'bg-sky-50 border-sky-100 text-sky-800' }, emerald: { bg: 'bg-white', border: 'border-emerald-200', title: 'text-emerald-700', sub: 'text-emerald-500', slot: 'bg-emerald-50 border-emerald-100 text-emerald-800' } }[theme] || { bg: 'bg-white', border: 'border-sky-200', title: 'text-sky-700', sub: 'text-sky-500', slot: 'bg-sky-50 border-sky-100 text-sky-800' };
+  const slots = [];
+  for (let i = 0; i < job.assignedStudentIds.length; i++) {
+    const studentId = job.assignedStudentIds[i]; const isSelected = selectedStudentForMove?.studentId === studentId;
+    slots.push(
+      <div key={`s-${studentId}`} onClick={() => onStudentClick(studentId, job.id)} className={`cursor-pointer p-1.5 rounded-lg text-center border transition-all select-none shadow-sm relative overflow-hidden group flex items-center justify-center ${isSelected ? 'bg-yellow-300 border-yellow-400 text-yellow-900 font-bold transform scale-105 z-10 shadow-lg' : `${t.slot} hover:scale-105 hover:shadow-md hover:border-${theme}-300`} ${isProjectorMode ? 'text-xl md:text-2xl py-3 font-black' : 'text-xs md:text-sm font-bold min-h-[40px]'}`}>
+        <span className="break-words w-full px-1">{getStudentDisplay(studentId)}</span>
+        {!isSelected && <div className="absolute top-0 right-0 w-2 h-2 md:w-3 md:h-3 bg-white/50 rounded-bl-full opacity-0 group-hover:opacity-100 transition"></div>}
+      </div>
+    );
+  }
+  for (let i = 0; i < job.count - job.assignedStudentIds.length; i++) {
+    slots.push(<div key={`empty-${i}`} onClick={() => onEmptySlotClick(job.id)} className={`cursor-pointer p-1.5 rounded-lg text-center border border-dashed border-gray-300 text-gray-400 hover:bg-white hover:border-gray-400 hover:text-gray-500 transition-colors flex items-center justify-center ${isProjectorMode ? 'text-xl py-3' : 'text-sm min-h-[40px]'}`}><Plus size={isProjectorMode ? 20 : 14} className="opacity-50" /></div>);
+  }
+  return (
+    <div className={`relative ${t.bg} rounded-2xl shadow-sm border-b-2 ${t.border} p-3 transition hover:-translate-y-1 hover:shadow-md`}>
+      <div className="flex justify-between items-start mb-2">
+        <div className="leading-tight">
+          <div className="flex items-center gap-2"><h3 className={`${isProjectorMode ? 'text-xl md:text-2xl' : 'text-sm md:text-base'} font-black ${t.title} tracking-tight`}>{job.zoneName}</h3><button onClick={(e) => { e.stopPropagation(); onGenTips(); }} className="text-yellow-400 hover:text-yellow-500 hover:scale-110 transition" title="AI 清潔小撇步"><Lightbulb size={isProjectorMode ? 20 : 16} fill="currentColor" /></button></div>
+          <span className={`${isProjectorMode ? 'text-xl md:text-2xl' : 'text-xs md:text-base'} font-bold ${t.sub}`}>{job.taskName}</span>
+        </div>
+        <span className="text-xs md:text-sm bg-slate-50 px-2 py-1 rounded-lg font-bold text-slate-500 border border-slate-200">{job.count}</span>
+      </div>
+      <div className={`grid ${isProjectorMode ? 'grid-cols-3 sm:grid-cols-4 gap-2' : 'grid-cols-2 gap-1.5'}`}>{slots}</div>
+    </div>
+  );
+}
