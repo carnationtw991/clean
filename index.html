@@ -152,17 +152,21 @@ export default function App() {
   };
 
   const checkBatchGenerate = () => (!parseInt(batchCount) || parseInt(batchCount) <= 0) ? showDialog('alert', '請輸入人數', '請輸入有效的人數喔！', null, 'warning') : (students.length > 0 ? showDialog('confirm', '確認生成', '名單中已有學生，確定要繼續加入嗎？', performBatchGenerate, 'warning', '繼續加入') : performBatchGenerate());
+  
   const removeStudent = (id) => {
     setStudents(students.filter(s => s.id !== id)); setConstraints(constraints.filter(c => c.studentA !== id && c.studentB !== id));
     setZoneConstraints(zoneConstraints.filter(zc => zc.studentId !== id)); setJobs(jobs.map(j => ({ ...j, assignedStudentIds: j.assignedStudentIds.filter(sid => sid !== id), preAssigned: (j.preAssigned || []).filter(sid => sid !== id) })));
   };
+  
   const handleClearAllStudents = () => showDialog('confirm', '清空所有學生', '😱 確定要清空所有學生名單嗎？此動作無法復原喔！', () => { setStudents([]); setZoneConstraints([]); setInspections({}); }, 'error', '殘忍清空');
 
   const addJob = () => {
     const zone = zones.find(z => z.id === selectedZoneId);
     setJobs([...jobs, { id: Date.now().toString(), zoneId: selectedZoneId, zoneName: zone.name, zoneType: zone.type, taskName: selectedTask, count: parseInt(neededCount), assignedStudentIds: [], preAssigned: [] }]);
   };
+  
   const removeJob = (id) => setJobs(jobs.filter(j => j.id !== id));
+  
   const updateJobCount = (id, delta) => setJobs(jobs.map(j => j.id === id ? { ...j, count: Math.max(1, j.count + delta) } : j));
 
   const handlePreAssign = (jobId, studentId) => {
@@ -173,6 +177,7 @@ export default function App() {
     setJobs(jobs.map(j => j.id === jobId ? { ...j, preAssigned: [...(j.preAssigned || []), studentId] } : j));
     setPreAssignModalJobId(null);
   };
+  
   const handleRemovePreAssign = (jobId, studentId) => setJobs(jobs.map(j => j.id === jobId ? { ...j, preAssigned: j.preAssigned.filter(id => id !== studentId) } : j));
 
   const exportWord = () => {
